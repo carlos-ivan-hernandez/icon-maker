@@ -1,5 +1,5 @@
 import {type KeyboardEvent, type PointerEvent, useEffect, useRef, useState} from 'react';
-import {drawIcon, ICON_SIZE, type Layout} from '../lib/render';
+import {drawIcon, LAYOUT_SIZE, type Layout} from '../lib/render';
 import {type LoadedSvg} from '../lib/svg';
 
 /** Within this many icon px of center, dragging snaps onto the axis. */
@@ -15,19 +15,21 @@ type Props = {
   size: number;
   svg: LoadedSvg | null;
   background: string;
+  /** Color the whole SVG is painted in; null keeps its own colors. */
+  color: string | null;
   layout: Layout;
   onLayoutChange: (layout: Layout) => void;
 };
 
 /** The large, interactive preview: drag to move, scroll to zoom, arrow keys
  * to nudge (Shift for 10px). */
-export function Preview({size, svg, background, layout, onLayoutChange}: Props) {
+export function Preview({size, svg, background, color, layout, onLayoutChange}: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const drag = useRef<{pointerX: number; pointerY: number; start: Layout} | null>(null);
   const [dragging, setDragging] = useState(false);
-  const toIcon = ICON_SIZE / size;
+  const toIcon = LAYOUT_SIZE / size;
 
-  useCanvas(canvasRef, size, svg, background, layout);
+  useCanvas(canvasRef, size, svg, background, color, layout);
 
   const onPointerDown = (e: PointerEvent<HTMLCanvasElement>) => {
     if (!svg || e.button !== 0) return;
@@ -107,9 +109,9 @@ export function Preview({size, svg, background, layout, onLayoutChange}: Props) 
 }
 
 /** A small, static rendering, for judging legibility at typical icon sizes. */
-export function Thumbnail({size, svg, background, layout}: Omit<Props, 'onLayoutChange'>) {
+export function Thumbnail({size, svg, background, color, layout}: Omit<Props, 'onLayoutChange'>) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  useCanvas(canvasRef, size, svg, background, layout);
+  useCanvas(canvasRef, size, svg, background, color, layout);
   return (
     <div className='flex flex-col items-center gap-1.5'>
       <canvas
@@ -129,6 +131,7 @@ function useCanvas(
   size: number,
   svg: LoadedSvg | null,
   background: string,
+  color: string | null,
   layout: Layout,
 ) {
   useEffect(() => {
@@ -140,6 +143,6 @@ function useCanvas(
       canvas.width = px;
       canvas.height = px;
     }
-    drawIcon(ctx, px, svg, background, layout);
-  }, [ref, size, svg, background, layout]);
+    drawIcon(ctx, px, svg, background, color, layout);
+  }, [ref, size, svg, background, color, layout]);
 }

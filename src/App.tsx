@@ -1,12 +1,13 @@
-import {Button, Input, Label, Separator, Slider, toast} from '@heroui/react';
+import {Button, Input, Label, Separator, Slider, toast, ToggleButton, ToggleButtonGroup} from '@heroui/react';
 import {type ChangeEvent, type DragEvent, useRef, useState} from 'react';
 import {clampZoom, MAX_ZOOM, MIN_ZOOM, Preview, Thumbnail} from './components/Preview';
-import {DEFAULT_LAYOUT, exportPng, ICON_SIZE, type Layout} from './lib/render';
+import {DEFAULT_LAYOUT, EXPORT_SIZES, type ExportSize, exportPng, type Layout} from './lib/render';
 import {type LoadedSvg, loadSvg} from './lib/svg';
 
 const PREVIEW_SIZE = 384;
 const THUMBNAIL_SIZES = [128, 64, 32];
-const DEFAULT_BACKGROUND = '#2563eb';
+const DEFAULT_BACKGROUND = '#1c1c1c';
+const DEFAULT_SVG_COLOR = '#e5e5e5';
 
 /** "#abc" or "#aabbcc" (with or without the #) → "#aabbcc"; anything else → null. */
 function normalizeHex(value: string): string | null {
@@ -20,10 +21,53 @@ function normalizeHex(value: string): string | null {
   return null;
 }
 
+/** A color picker plus a hex field. Typing only applies once the text is a
+ * valid hex color, and leaving the field puts back the color in use. */
+function ColorField({
+  id,
+  label,
+  value,
+  onChange,
+}: {
+  id: string;
+  label: string;
+  value: string;
+  onChange: (hex: string) => void;
+}) {
+  const [draft, setDraft] = useState(value);
+  const set = (text: string) => {
+    setDraft(text);
+    const hex = normalizeHex(text);
+    if (hex) onChange(hex);
+  };
+  return (
+    <div className='flex items-center gap-2'>
+      <input
+        type='color'
+        aria-label={`${label} color picker`}
+        className='h-9 w-12 shrink-0 cursor-pointer rounded border border-border bg-transparent p-0.5'
+        value={value}
+        onChange={e => set(e.target.value)}
+      />
+      <Input
+        id={id}
+        className='flex-1 font-mono'
+        value={draft}
+        spellCheck={false}
+        onChange={e => set(e.target.value)}
+        onBlur={() => setDraft(value)}
+      />
+    </div>
+  );
+}
+
 export default function App() {
   const [svg, setSvg] = useState<LoadedSvg | null>(null);
   const [background, setBackground] = useState(DEFAULT_BACKGROUND);
-  const [hexDraft, setHexDraft] = useState(DEFAULT_BACKGROUND);
+  const [svgColor, setSvgColor] = useState(DEFAULT_SVG_COLOR);
+  /** False draws the SVG in its own colors; `svgColor` is kept for switching back. */
+  const [recolor, setRecolor] = useState(true);
+  const [exportSize, setExportSize] = useState<ExportSize>(1024);
   const [layout, setLayout] = useState<Layout>(DEFAULT_LAYOUT);
   const [saving, setSaving] = useState(false);
   const [dropActive, setDropActive] = useState(false);
@@ -53,18 +97,14 @@ export default function App() {
     else if (e.dataTransfer.files.length) toast.danger('Drop an .svg file');
   };
 
-  const setColor = (value: string) => {
-    setHexDraft(value);
-    const hex = normalizeHex(value);
-    if (hex) setBackground(hex);
-  };
+  const color = recolor ? svgColor : null;
 
   const createPng = async () => {
     if (!svg) return;
     setSaving(true);
     try {
       const suggested = `${svg.name.replace(/\.svg$/i, '')}.png`;
-      const url = URL.createObjectURL(await exportPng(svg, background, layout));
+      const url = URL.createObjectURL(await exportPng(svg, background, color, layout, exportSize));
       const link = document.createElement('a');
       link.href = url;
       link.download = suggested;
@@ -96,6 +136,7 @@ export default function App() {
           size={PREVIEW_SIZE}
           svg={svg}
           background={background}
+          color={color}
           layout={layout}
           onLayoutChange={setLayout}
         />
@@ -107,6 +148,7 @@ export default function App() {
                 size={size}
                 svg={svg}
                 background={background}
+                color={color}
                 layout={layout}
               />
             ))}
@@ -149,23 +191,36 @@ export default function App() {
 
         <section className='flex flex-col gap-2'>
           <Label htmlFor='background-hex'>Background</Label>
-          <div className='flex items-center gap-2'>
-            <input
-              type='color'
-              aria-label='Background color picker'
-              className='h-9 w-12 shrink-0 cursor-pointer rounded border border-border bg-transparent p-0.5'
-              value={background}
-              onChange={e => setColor(e.target.value)}
-            />
-            <Input
-              id='background-hex'
-              className='flex-1 font-mono'
-              value={hexDraft}
-              spellCheck={false}
-              onChange={e => setColor(e.target.value)}
-              onBlur={() => setHexDraft(background)}
-            />
+          <ColorField
+            id='background-hex'
+            label='Background'
+            value={background}
+            onChange={setBackground}
+          />
+        </section>
+
+        <section className='flex flex-col gap-2'>
+          <div className='flex items-baseline justify-between'>
+            <Label htmlFor='svg-color-hex'>SVG color</Label>
+            <span className='text-sm text-muted'>{recolor ? 'One color' : 'Original colors'}</span>
           </div>
+          <ColorField
+            id='svg-color-hex'
+            label='SVG'
+            value={svgColor}
+            onChange={hex => {
+              setSvgColor(hex);
+              setRecolor(true);
+            }}
+          />
+          <Button
+            size='sm'
+            variant='ghost'
+            onPress={() => setRecolor(!recolor)}
+          >
+            {recolor ? 'Use original colors' : `Use ${svgColor}`}
+          </Button>
+          <p className='text-xs text-muted'>The whole SVG is painted in this color. Use original colors to undo it.</p>
         </section>
 
         <Separator />
@@ -240,12 +295,33 @@ export default function App() {
           >
             Reset layout
           </Button>
+          <ToggleButtonGroup
+            aria-label='PNG size'
+            fullWidth
+            selectionMode='single'
+            disallowEmptySelection
+            selectedKeys={[exportSize]}
+            onSelectionChange={keys => {
+              const [key] = keys;
+              const size = EXPORT_SIZES.find(s => s === Number(key));
+              if (size) setExportSize(size);
+            }}
+          >
+            {EXPORT_SIZES.map(size => (
+              <ToggleButton
+                key={size}
+                id={size}
+              >
+                {size}×{size}
+              </ToggleButton>
+            ))}
+          </ToggleButtonGroup>
           <Button
             size='lg'
             isDisabled={!svg || saving}
             onPress={createPng}
           >
-            Create {ICON_SIZE}×{ICON_SIZE} PNG
+            Create {exportSize}×{exportSize} PNG
           </Button>
         </div>
       </aside>
