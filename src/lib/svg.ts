@@ -44,7 +44,7 @@ export async function loadSvg(name: string, markup: string): Promise<LoadedSvg> 
 
 /** Width and height from the viewBox, else from absolute width/height
  * attributes, else a square. */
-function intrinsicSize(svg: Element): [number, number] {
+export function intrinsicSize(svg: Element): [number, number] {
   const viewBox = svg
     .getAttribute('viewBox')
     ?.trim()

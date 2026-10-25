@@ -4,6 +4,7 @@ import {clampZoom, MAX_ZOOM, MIN_ZOOM, Preview, Thumbnail} from './components/Pr
 import {SvgPreview} from './components/SvgPreview';
 import {extractColors, recolorSvg} from './lib/recolor';
 import {DEFAULT_LAYOUT, EXPORT_SIZES, type ExportSize, exportPng, type Layout} from './lib/render';
+import {elementNames, parentsOf, removeElements, tagElements, untag} from './lib/sections';
 import {type LoadedSvg, loadSvg} from './lib/svg';
 
 type Mode = 'png' | 'edit';
@@ -85,6 +86,10 @@ export default function App() {
   const [mode, setMode] = useState<Mode>('png');
   /** The file as chosen; color edits are applied on top of it. */
   const [source, setSource] = useState<{name: string; markup: string} | null>(null);
+  /** Deleted parts of the SVG by element index, one batch per deletion so it can be undone. */
+  const [deleted, setDeleted] = useState<number[][]>([]);
+  /** Parts selected in Edit SVG mode, by element index. */
+  const [selected, setSelected] = useState<number[]>([]);
   /** Original color → new color, both "#rrggbb". */
   const [colorMap, setColorMap] = useState<Record<string, string>>({});
   /** The SVG with color edits applied, decoded for the PNG canvas. */
@@ -99,8 +104,22 @@ export default function App() {
   const [dropActive, setDropActive] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const palette = useMemo(() => (source ? extractColors(source.markup) : []), [source]);
-  const editedMarkup = useMemo(() => (source ? recolorSvg(source.markup, colorMap) : null), [source, colorMap]);
+  // source → tag each element → delete parts → recolor (still tagged, for the
+  // editor) → untag (for download and PNG mode).
+  const tagged = useMemo(() => (source ? tagElements(source.markup) : null), [source]);
+  const trimmed = useMemo(() => (tagged ? removeElements(tagged, new Set(deleted.flat())) : null), [tagged, deleted]);
+  const palette = useMemo(() => (trimmed ? extractColors(trimmed) : []), [trimmed]);
+  const editedTagged = useMemo(() => (trimmed ? recolorSvg(trimmed, colorMap) : null), [trimmed, colorMap]);
+  const editedMarkup = useMemo(() => (editedTagged ? untag(editedTagged) : null), [editedTagged]);
+  const selectionParents = useMemo(
+    () => (trimmed && selected.length ? parentsOf(trimmed, selected) : []),
+    [trimmed, selected],
+  );
+  const canSelectParent = selectionParents.some(i => !selected.includes(i));
+  const selectedNames = useMemo(
+    () => (trimmed && selected.length ? [...new Set(elementNames(trimmed, selected))] : []),
+    [trimmed, selected],
+  );
   const edited = Object.entries(colorMap).some(([from, to]) => from !== to);
 
   // Keep the PNG mode's SVG in step with the color edits.
@@ -122,6 +141,8 @@ export default function App() {
       setSvg(await loadSvg(name, markup));
       setSource({name, markup});
       setColorMap({});
+      setDeleted([]);
+      setSelected([]);
       setLayout(DEFAULT_LAYOUT);
     } catch (err) {
       toast.danger(`Could not load "${name}"`, {description: err instanceof Error ? err.message : String(err)});
@@ -134,6 +155,39 @@ export default function App() {
     setRecolor(false);
   };
   const setAllColors = (hex: string) => editColors(() => Object.fromEntries(palette.map(c => [c, hex])));
+
+  const deleteSelected = () => {
+    if (!selected.length) return;
+    setDeleted(d => [...d, selected]);
+    setSelected([]);
+  };
+  const undoDelete = () => {
+    setDeleted(d => d.slice(0, -1));
+    setSelected(deleted.at(-1) ?? []);
+  };
+
+  // Delete/Backspace deletes the selection, Escape clears it, Ctrl/Cmd+Z undoes a deletion.
+  useEffect(() => {
+    if (mode !== 'edit') return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      const t = e.target;
+      if (t instanceof HTMLElement && (t.closest('input, textarea, select') || t.isContentEditable)) return;
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        if (!selected.length) return;
+        e.preventDefault();
+        setDeleted(d => [...d, selected]);
+        setSelected([]);
+      } else if (e.key === 'Escape') {
+        setSelected([]);
+      } else if (e.key.toLowerCase() === 'z' && (e.metaKey || e.ctrlKey) && !e.shiftKey && deleted.length) {
+        e.preventDefault();
+        setDeleted(d => d.slice(0, -1));
+        setSelected(deleted.at(-1) ?? []);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [mode, selected, deleted]);
 
   const downloadSvg = () => {
     if (!source || !editedMarkup) return;
@@ -187,7 +241,9 @@ export default function App() {
         {mode === 'edit' ? (
           <SvgPreview
             size={PREVIEW_SIZE}
-            markup={editedMarkup}
+            markup={editedTagged}
+            selected={selected}
+            onSelect={setSelected}
           />
         ) : (
           <Preview
@@ -265,6 +321,48 @@ export default function App() {
 
         {mode === 'edit' ? (
           <>
+            <section className='flex flex-col gap-2'>
+              <div className='flex items-baseline justify-between'>
+                <Label>Parts</Label>
+                <span className='text-sm text-muted'>
+                  {selected.length ? `${selected.length} selected (${selectedNames.join(', ')})` : ''}
+                </span>
+              </div>
+              <Button
+                variant='danger'
+                isDisabled={!selected.length}
+                onPress={deleteSelected}
+              >
+                {selected.length > 1 ? `Delete ${selected.length} parts` : 'Delete selected part'}
+              </Button>
+              <div className='flex gap-2'>
+                <Button
+                  className='flex-1'
+                  size='sm'
+                  variant='ghost'
+                  isDisabled={!canSelectParent}
+                  onPress={() => setSelected(selectionParents)}
+                >
+                  Select group
+                </Button>
+                <Button
+                  className='flex-1'
+                  size='sm'
+                  variant='ghost'
+                  isDisabled={!deleted.length}
+                  onPress={undoDelete}
+                >
+                  Undo delete
+                </Button>
+              </div>
+              <p className='text-xs text-muted'>
+                Click part of the SVG to select it, Shift-click to select more. Delete or Backspace removes it, Ctrl/⌘Z
+                undoes.
+              </p>
+            </section>
+
+            <Separator />
+
             <section className='flex flex-col gap-3'>
               <div className='flex items-baseline justify-between'>
                 <Label>Colors</Label>
@@ -308,13 +406,27 @@ export default function App() {
             )}
 
             <div className='mt-auto flex flex-col gap-2'>
-              <Button
-                variant='ghost'
-                isDisabled={!edited}
-                onPress={() => setColorMap({})}
-              >
-                Reset colors
-              </Button>
+              <div className='flex gap-2'>
+                <Button
+                  className='flex-1'
+                  variant='ghost'
+                  isDisabled={!deleted.length}
+                  onPress={() => {
+                    setDeleted([]);
+                    setSelected([]);
+                  }}
+                >
+                  Restore all parts
+                </Button>
+                <Button
+                  className='flex-1'
+                  variant='ghost'
+                  isDisabled={!edited}
+                  onPress={() => setColorMap({})}
+                >
+                  Reset colors
+                </Button>
+              </div>
               <Button
                 size='lg'
                 isDisabled={!source}
@@ -322,7 +434,9 @@ export default function App() {
               >
                 Download SVG
               </Button>
-              {edited && <p className='text-xs text-muted'>PNG icon mode uses these colors too.</p>}
+              {(edited || deleted.length > 0) && (
+                <p className='text-xs text-muted'>PNG icon mode uses these changes too.</p>
+              )}
             </div>
           </>
         ) : (
