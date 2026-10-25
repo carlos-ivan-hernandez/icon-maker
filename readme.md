@@ -38,7 +38,7 @@ Everything runs in the browser. `src/lib/render.ts` has a single `drawIcon` func
 
 `src/lib/trim.ts` finds the drawing's edges by rendering the SVG at 2048px and finding the pixels that aren't fully transparent, so strokes, filters and clipping all count. Each edge is then snapped to the roundest value inside its outermost drawn pixel (a shape edge at x=20 gives 20, not 19.97).
 
-`src/lib/compat.ts` prepares the downloaded SVG for programs other than browsers: `currentColor` is replaced with the color it stands for (black unless the SVG sets one), since simpler renderers draw it as nothing, and an SVG with no width/height gets them from its viewBox.
+`src/lib/compat.ts` prepares the downloaded SVG for programs other than browsers: `currentColor` is replaced with the color it stands for (black unless the SVG sets one), since simpler renderers draw it as nothing. Each `<switch>` is replaced with the child a browser would draw, since Illustrator files wrap the artwork in a `<switch>` whose first child is an empty placeholder. An SVG with no width/height gets them from its viewBox.
 
 `src/lib/svg.ts` gives every SVG explicit width/height from its viewBox before decoding, since SVGs with only a viewBox otherwise render at the wrong size in some browsers.
 

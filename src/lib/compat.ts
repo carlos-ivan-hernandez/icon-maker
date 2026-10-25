@@ -24,12 +24,37 @@ function colorOf(el: Element): string {
   return DEFAULT_COLOR;
 }
 
-/** The markup with `currentColor` swapped for the color it stands for, and
- * width/height set from the viewBox when the root has none. */
+/** Whether a browser would pick `el` in a <switch>: it needs no extensions
+ * and, if it names languages, one matches the browser's. */
+function passesConditions(el: Element) {
+  if (el.getAttribute('requiredExtensions')?.trim()) return false;
+  const languages = el.getAttribute('systemLanguage');
+  if (languages === null) return true;
+  const mine = navigator.language.toLowerCase().split('-')[0];
+  return languages.split(',').some(l => l.trim().toLowerCase().split('-')[0] === mine);
+}
+
+/** Replaces each <switch> with the one child a browser draws. Illustrator
+ * (and so Noun Project icons) wraps the artwork in a <switch> whose first
+ * child is an empty Illustrator-only placeholder; renderers that don't
+ * evaluate <switch> the same way draw the placeholder, i.e. nothing. */
+function unwrapSwitches(doc: Document) {
+  for (const sw of doc.querySelectorAll('switch')) {
+    const chosen = [...sw.children].find(passesConditions);
+    if (chosen) sw.replaceWith(chosen);
+    else sw.remove();
+  }
+}
+
+/** The markup with `currentColor` swapped for the color it stands for,
+ * <switch> elements resolved, and width/height set from the viewBox when the
+ * root has none. */
 export function forExport(markup: string): string {
   const doc = new DOMParser().parseFromString(markup, 'image/svg+xml');
   const svg = doc.documentElement;
   if (doc.querySelector('parsererror') || svg.localName !== 'svg') return markup;
+
+  unwrapSwitches(doc);
 
   for (const el of doc.querySelectorAll('*')) {
     for (const attr of COLOR_ATTRIBUTES) {
