@@ -2,6 +2,7 @@ import {Button, Input, Label, Separator, Slider, toast, ToggleButton, ToggleButt
 import {type ChangeEvent, type DragEvent, useEffect, useMemo, useRef, useState} from 'react';
 import {clampZoom, MAX_ZOOM, MIN_ZOOM, Preview, Thumbnail} from './components/Preview';
 import {SvgPreview} from './components/SvgPreview';
+import {forExport} from './lib/compat';
 import {extractColors, recolorSvg} from './lib/recolor';
 import {DEFAULT_LAYOUT, EXPORT_SIZES, type ExportSize, exportPng, type Layout} from './lib/render';
 import {elementNames, parentsOf, removeElements, tagElements, untag} from './lib/sections';
@@ -223,7 +224,7 @@ export default function App() {
 
   const downloadSvg = () => {
     if (!source || !editedMarkup) return;
-    download(new Blob([editedMarkup], {type: 'image/svg+xml'}), source.name.replace(/(\.svg)?$/i, '.svg'));
+    download(new Blob([forExport(editedMarkup)], {type: 'image/svg+xml'}), source.name.replace(/(\.svg)?$/i, '.svg'));
   };
 
   const onFileChosen = async (e: ChangeEvent<HTMLInputElement>) => {
