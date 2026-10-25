@@ -1,6 +1,6 @@
 # Icon Maker
 
-A small web app for turning an SVG into a 1024×1024 or 512×512 PNG app icon on a solid background, or for changing an SVG's colors, deleting parts of it, and saving it as a new SVG.
+A small web app for turning an SVG into a 1024×1024 or 512×512 PNG app icon on a solid background, or for changing an SVG's colors, deleting parts of it, trimming the empty space around it, and saving it as a new SVG.
 
 ## Usage
 
@@ -22,10 +22,11 @@ The 128/64/32px previews show how the icon reads at small sizes.
 Switch to **Edit SVG** at the top of the sidebar to delete parts of the SVG or change its own colors:
 
 1. Click part of the SVG to select it (Shift-click to select more, Escape to clear). **Select group** widens the selection to the group it's in. **Delete** (or the Delete/Backspace key) removes it. **Undo delete** (Ctrl/⌘Z) brings back the last deletion, and **Restore all parts** brings back everything.
-2. Every color the SVG uses is listed. Change any of them with the picker or a hex value, or use **Make it all one color**.
-3. **Download SVG** saves the edited file. **Reset colors** goes back to the original colors.
+2. **Trim** shrinks the SVG's canvas (its viewBox) to just fit the drawing, with no empty space around it. Width and height in px shrink to match. It stays fitted as you delete parts, and **Undo trim** puts the original canvas back.
+3. Every color the SVG uses is listed. Change any of them with the picker or a hex value, or use **Make it all one color**.
+4. **Download SVG** saves the edited file. **Reset colors** goes back to the original colors.
 
-Deletions carry over to PNG icon mode. So do color edits, which also switch PNG icon mode to the SVG's own colors so they show.
+Deletions and trimming carry over to PNG icon mode. So do color edits, which also switch PNG icon mode to the SVG's own colors so they show.
 
 ## How it works
 
@@ -34,6 +35,8 @@ Everything runs in the browser. `src/lib/render.ts` has a single `drawIcon` func
 `src/lib/recolor.ts` finds and replaces colors in the SVG markup: `fill`, `stroke`, `stop-color` and similar attributes, inline `style` attributes and `<style>` blocks. Shapes with no fill (and `currentColor` with no color set) are drawn black by default; those show up as black, and changing it sets the new color on the root `<svg>`.
 
 `src/lib/sections.ts` handles deleting parts. Each element is tagged with its position in the original file, so a deletion keeps pointing at the same element. The tags are taken out again before download. The Edit SVG preview draws the SVG inline inside a shadow root (with scripts and event handlers removed), so its parts can be clicked and its `<style>` can't affect the page.
+
+`src/lib/trim.ts` finds the drawing's edges by rendering the SVG at 2048px and finding the pixels that aren't fully transparent, so strokes, filters and clipping all count. Each edge is then snapped to the roundest value inside its outermost drawn pixel (a shape edge at x=20 gives 20, not 19.97).
 
 `src/lib/svg.ts` gives every SVG explicit width/height from its viewBox before decoding, since SVGs with only a viewBox otherwise render at the wrong size in some browsers.
 

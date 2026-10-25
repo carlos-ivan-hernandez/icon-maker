@@ -1,6 +1,7 @@
 import {type PointerEvent, useLayoutEffect, useRef, useState} from 'react';
 import {elementIndex, INDEX_ATTR} from '../lib/sections';
 import {intrinsicSize} from '../lib/svg';
+import {viewBoxOf} from '../lib/trim';
 
 type Box = {left: number; top: number; width: number; height: number};
 
@@ -13,7 +14,7 @@ type Props = {
 };
 
 /** A copy of the SVG that is safe to put in the page and fills its box:
- * no scripts or event handlers, and a viewBox with 100% width/height. */
+ * no scripts or event handlers, and sized to fit at its viewBox's shape. */
 function displayCopy(markup: string): Element | null {
   const doc = new DOMParser().parseFromString(markup, 'image/svg+xml');
   const svg = doc.documentElement;
@@ -30,10 +31,19 @@ function displayCopy(markup: string): Element | null {
     const [w, h] = intrinsicSize(svg);
     svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
   }
-  svg.setAttribute('width', '100%');
-  svg.setAttribute('height', '100%');
+  // As large as fits, at the viewBox's shape, so the checkerboard shows
+  // exactly where the canvas ends.
+  const [, , w, h] = viewBoxOf(svg);
+  svg.removeAttribute('width');
+  svg.removeAttribute('height');
+  svg.setAttribute(
+    'style',
+    `${svg.getAttribute('style') ?? ''};aspect-ratio:${w}/${h};${w >= h ? 'width:100%;height:auto' : 'height:100%;width:auto'}`,
+  );
   return document.importNode(svg, true);
 }
+
+const CHECKERBOARD = 'linear-gradient(45deg, #ddd 25%, transparent 25%, transparent 75%, #ddd 75%)';
 
 /** The edited SVG on a checkerboard, so transparent areas are visible. Click
  * a part to select it, Shift-click to add to the selection. */
@@ -57,7 +67,15 @@ export function SvgPreview({size, markup, selected, onSelect}: Props) {
     if (!host) return;
     const root = host.shadowRoot ?? host.attachShadow({mode: 'open'});
     const style = document.createElement('style');
-    style.textContent = ':host { display: block; width: 100%; height: 100%; } svg { display: block; }';
+    style.textContent = `
+      :host { display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; }
+      svg {
+        display: block;
+        background-color: #fff;
+        background-image: ${CHECKERBOARD}, ${CHECKERBOARD};
+        background-size: 16px 16px;
+        background-position: 0 0, 8px 8px;
+      }`;
     const svg = markup ? displayCopy(markup) : null;
     root.replaceChildren(style, ...(svg ? [svg] : []));
   }, [markup]);
@@ -105,16 +123,8 @@ export function SvgPreview({size, markup, selected, onSelect}: Props) {
 
   return (
     <div
-      className='rounded-md p-8 shadow-lg ring-1 ring-border'
-      style={{
-        width: size,
-        height: size,
-        backgroundColor: '#fff',
-        backgroundImage:
-          'linear-gradient(45deg, #ddd 25%, transparent 25%, transparent 75%, #ddd 75%), linear-gradient(45deg, #ddd 25%, transparent 25%, transparent 75%, #ddd 75%)',
-        backgroundSize: '16px 16px',
-        backgroundPosition: '0 0, 8px 8px',
-      }}
+      className='rounded-md bg-surface p-8 shadow-lg ring-1 ring-border'
+      style={{width: size, height: size}}
     >
       <div className='relative h-full w-full'>
         <div

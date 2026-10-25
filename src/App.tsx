@@ -6,6 +6,7 @@ import {extractColors, recolorSvg} from './lib/recolor';
 import {DEFAULT_LAYOUT, EXPORT_SIZES, type ExportSize, exportPng, type Layout} from './lib/render';
 import {elementNames, parentsOf, removeElements, tagElements, untag} from './lib/sections';
 import {type LoadedSvg, loadSvg} from './lib/svg';
+import {trimSvg, viewBoxOf} from './lib/trim';
 
 type Mode = 'png' | 'edit';
 
@@ -102,23 +103,53 @@ export default function App() {
   const [layout, setLayout] = useState<Layout>(DEFAULT_LAYOUT);
   const [saving, setSaving] = useState(false);
   const [dropActive, setDropActive] = useState(false);
+  /** Shrink the viewBox to just contain the drawing. */
+  const [trim, setTrim] = useState(false);
+  /** The last trim, and the markup it was made from. */
+  const [trimmed, setTrimmed] = useState<{from: string; result: Awaited<ReturnType<typeof trimSvg>>} | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // source → tag each element → delete parts → recolor (still tagged, for the
-  // editor) → untag (for download and PNG mode).
+  // source → tag each element → delete parts → recolor → trim (still tagged,
+  // for the editor) → untag (for download and PNG mode).
   const tagged = useMemo(() => (source ? tagElements(source.markup) : null), [source]);
-  const trimmed = useMemo(() => (tagged ? removeElements(tagged, new Set(deleted.flat())) : null), [tagged, deleted]);
-  const palette = useMemo(() => (trimmed ? extractColors(trimmed) : []), [trimmed]);
-  const editedTagged = useMemo(() => (trimmed ? recolorSvg(trimmed, colorMap) : null), [trimmed, colorMap]);
+  const withoutDeleted = useMemo(
+    () => (tagged ? removeElements(tagged, new Set(deleted.flat())) : null),
+    [tagged, deleted],
+  );
+  const palette = useMemo(() => (withoutDeleted ? extractColors(withoutDeleted) : []), [withoutDeleted]);
+  const recolored = useMemo(
+    () => (withoutDeleted ? recolorSvg(withoutDeleted, colorMap) : null),
+    [withoutDeleted, colorMap],
+  );
+  // Trimming draws the SVG to find its edges, so it's async; until it's
+  // done the untrimmed SVG shows.
+  useEffect(() => {
+    if (!trim || !recolored) return;
+    let cancelled = false;
+    trimSvg(recolored).then(
+      result => !cancelled && setTrimmed({from: recolored, result}),
+      () => {},
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [trim, recolored]);
+  const trimDone = trim && trimmed?.from === recolored ? trimmed.result : null;
+  const editedTagged = trimDone ? trimDone.markup : recolored;
+  const viewBox = useMemo(
+    () =>
+      editedTagged ? viewBoxOf(new DOMParser().parseFromString(editedTagged, 'image/svg+xml').documentElement) : null,
+    [editedTagged],
+  );
   const editedMarkup = useMemo(() => (editedTagged ? untag(editedTagged) : null), [editedTagged]);
   const selectionParents = useMemo(
-    () => (trimmed && selected.length ? parentsOf(trimmed, selected) : []),
-    [trimmed, selected],
+    () => (withoutDeleted && selected.length ? parentsOf(withoutDeleted, selected) : []),
+    [withoutDeleted, selected],
   );
   const canSelectParent = selectionParents.some(i => !selected.includes(i));
   const selectedNames = useMemo(
-    () => (trimmed && selected.length ? [...new Set(elementNames(trimmed, selected))] : []),
-    [trimmed, selected],
+    () => (withoutDeleted && selected.length ? [...new Set(elementNames(withoutDeleted, selected))] : []),
+    [withoutDeleted, selected],
   );
   const edited = Object.entries(colorMap).some(([from, to]) => from !== to);
 
@@ -143,6 +174,7 @@ export default function App() {
       setColorMap({});
       setDeleted([]);
       setSelected([]);
+      setTrim(false);
       setLayout(DEFAULT_LAYOUT);
     } catch (err) {
       toast.danger(`Could not load "${name}"`, {description: err instanceof Error ? err.message : String(err)});
@@ -363,6 +395,33 @@ export default function App() {
 
             <Separator />
 
+            <section className='flex flex-col gap-2'>
+              <div className='flex items-baseline justify-between'>
+                <Label>Canvas</Label>
+                {viewBox && (
+                  <span
+                    className='text-sm tabular-nums text-muted'
+                    title={`viewBox="${viewBox.join(' ')}"`}
+                  >
+                    {viewBox[2]} × {viewBox[3]}
+                  </span>
+                )}
+              </div>
+              <Button
+                variant='outline'
+                isDisabled={!source}
+                onPress={() => setTrim(!trim)}
+              >
+                {trim ? 'Undo trim' : 'Trim'}
+              </Button>
+              <p className='text-xs text-muted'>
+                Trim shrinks the canvas to just fit the drawing, with no empty space around it. It stays fitted as you
+                delete parts.
+              </p>
+            </section>
+
+            <Separator />
+
             <section className='flex flex-col gap-3'>
               <div className='flex items-baseline justify-between'>
                 <Label>Colors</Label>
@@ -434,7 +493,7 @@ export default function App() {
               >
                 Download SVG
               </Button>
-              {(edited || deleted.length > 0) && (
+              {(edited || deleted.length > 0 || trim) && (
                 <p className='text-xs text-muted'>PNG icon mode uses these changes too.</p>
               )}
             </div>
